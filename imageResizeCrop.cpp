@@ -6,7 +6,6 @@
 using namespace cv;
 using namespace std;
 
-
 ////////////// Resize and Crop function ////////////
 int main()
 {
@@ -15,7 +14,7 @@ int main()
 
     /// Mat é uma instância de um objeto dentro do OpenCV que cria matrizes
     Mat img = imread(path), imgResize, imgCrop;
-    
+
     //cout << img.size() << endl;
 
     // resize the image with the scale (2 lasts arguments) or Size(X, Y) to set precisely.
