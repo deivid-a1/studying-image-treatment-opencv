@@ -1,1 +1,4 @@
 g++ imageProcessing.cpp -o compilation/imagePGray -std=c++11 `pkg-config --cflags --libs opencv`
+
+// with Xlib
+g++ opencv/screenshot.cpp -o compilation/screenshot -std=c++11 -lX11 `pkg-config --cflags --libs opencv`
