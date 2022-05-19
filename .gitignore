@@ -1,2 +1,7 @@
 .vscode/*.json
 weights/*.weights
+
+caffe/*.pb
+caffe/input/*.caffemodel
+
+tensor/*.pb
