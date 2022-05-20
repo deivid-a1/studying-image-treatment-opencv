@@ -1,0 +1,58 @@
+#include <opencv4/opencv2/opencv.hpp>
+#include <opencv4/opencv2/core/ocl.hpp>
+
+#include <opencv4/opencv2/dnn.hpp>
+#include <opencv4/opencv2/dnn/all_layers.hpp>
+
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+
+#include <time.h>
+using namespace cv;
+using namespace std;
+using namespace dnn;
+
+int main()
+{
+
+    cv::ocl::Context context;
+    cv::ocl::Device(context.device(1));
+
+    ScreenShot screen(0, 0, 1024, 768);
+
+    Mat image, blob;
+    UMat UImg, Ublob;
+    
+
+    std::vector<std::string> class_names {"sign_red", "sign_green", "sign_yellow"};
+    auto model = readNetFromDarknet("cfg.cfg", "weights/peso.weights");
+
+    model.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+    model.setPreferableTarget(DNN_TARGET_OPENCL);
+
+    while(true) 
+    {
+        screen(image);
+
+        cvtColor(image, image, COLOR_BGRA2BGR);
+
+        int image_height = image.cols;
+        int image_width = image.rows;
+
+        auto start = getTickCount();
+        
+        blob = blobFromImage(image, 0.00392, Size(416, 416), Scalar(0, 0, 0),true, false);
+        
+        model.setInput(blob,"", 0.00392, 0);
+    
+        vector<int> outLayers = model.getUnconnectedOutLayers();
+        vector<cv::String> layersNames = model.getLayerNames();
+        
+        vector<cv::String> names;
+        names.resize(outLayers.size());
+
+        Mat outMat;
+        model.forward(outMat, names); // the error is called here
+        ...
+    }
+}
