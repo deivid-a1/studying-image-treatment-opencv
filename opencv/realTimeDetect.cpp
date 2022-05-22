@@ -14,6 +14,34 @@ using namespace cv;
 using namespace std;
 using namespace dnn;
 
+
+vector<string> classes {"sign_green", "sign_red", "sign_yellow"};
+float nms = 0.4;
+float conf_threshold = 0.5;
+vector<Mat> outs;
+
+void draw_box(int classId, float conf, int left, int top, int right, int bottom, Mat& frame)
+{
+    //Draw a rectangle displaying the bounding box
+    rectangle(frame, Point(left, top), Point(right, bottom), Scalar(255, 178, 50), 3);
+    
+    //Get the label for the class name and its confidence
+    string label = format("%.2f", conf);
+    if (!classes.empty())
+    {
+        CV_Assert(classId < (int)classes.size());
+        label = classes[classId] + ":" + label;
+    }
+    
+    //Display the label at the top of the bounding box
+    int baseLine;
+    Size labelSize = getTextSize(label, FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
+    top = max(top, labelSize.height);
+    rectangle(frame, Point(left, top - round(1.5*labelSize.height)), Point(left + round(1.5*labelSize.width), top + baseLine), Scalar(255, 255, 255), FILLED);
+    putText(frame, label, Point(left, top), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,0),1);
+}
+
+
 class ScreenShot
 {
     Display* display;
@@ -47,10 +75,52 @@ public:
     }
 };
 
-
-double clockToMilliseconds(clock_t ticks){
-    // units/(units/time) => time (seconds) * 1000 = milliseconds
-    return (ticks/(double)CLOCKS_PER_SEC)*1000.0;
+void remove_box(Mat& frame, const vector<Mat>& outs)
+{
+    vector<int> classIds;
+    vector<float> confidences;
+    vector<Rect> boxes;
+    
+    for (size_t i = 0; i < outs.size(); ++i)
+    {
+        // Scan through all the bounding boxes output from the network and keep only the
+        // ones with high confidence scores. Assign the box's class label as the class
+        // with the highest score for the box.
+        float* data = (float*)outs[i].data;
+        for (int j = 0; j < outs[i].rows; ++j, data += outs[i].cols)
+        {
+            Mat scores = outs[i].row(j).colRange(5, outs[i].cols);
+            Point classIdPoint;
+            double confidence;
+            // Get the value and location of the maximum score
+            minMaxLoc(scores, 0, &confidence, 0, &classIdPoint);
+            if (confidence > conf_threshold)
+            {
+                int centerX = (int)(data[0] * frame.cols);
+                int centerY = (int)(data[1] * frame.rows);
+                int width = (int)(data[2] * frame.cols);
+                int height = (int)(data[3] * frame.rows);
+                int left = centerX - width / 2;
+                int top = centerY - height / 2;
+                
+                classIds.push_back(classIdPoint.x);
+                confidences.push_back((float)confidence);
+                boxes.push_back(Rect(left, top, width, height));
+            }
+        }
+    }
+    
+    // Perform non maximum suppression to eliminate redundant overlapping boxes with
+    // lower confidences
+    vector<int> indices;
+    NMSBoxes(boxes, confidences, conf_threshold, nms, indices);
+    for (size_t i = 0; i < indices.size(); ++i)
+    {
+        int idx = indices[i];
+        Rect box = boxes[idx];
+        draw_box(classIds[idx], confidences[idx], box.x, box.y,
+        box.x + box.width, box.y + box.height, frame);
+    }
 }
 
 vector<String> getOutputsNames(const Net& net)
@@ -77,15 +147,17 @@ int main()
 
 
     cv::ocl::Context context;
-    cv::ocl::Device(context.device(1));
+    cv::ocl::Device(context);
+
+
+cout << "Device Type: " << context.device(1).name()<< endl;
+    int a;
+    cin >> a;
 
     ScreenShot screen(0, 0, 1024, 768);
     
-
-    std::vector<std::string> class_names {"sign_red", "sign_green", "sign_yellow"};
     auto model = readNetFromDarknet("cfg.cfg", "weights/peso.weights");
 
-    model.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
     model.setPreferableTarget(DNN_TARGET_OPENCL);
 
 
@@ -97,67 +169,43 @@ int main()
 
         cvtColor(image, image, COLOR_BGRA2BGR);
 
-        int image_height = image.cols;
-        int image_width = image.rows;
-
         auto start = getTickCount();
         
-        Mat blob = blobFromImage(image, 0.00392, Size(320, 320), Scalar(0, 0, 0),true, false);
+        Mat blob = blobFromImage(image, 0.00392, Size(416, 416), Scalar(0, 0, 0),true, false);
         
         model.setInput(blob);
 
 
-        vector<String> names;
-        vector<int> outLayers = model.getUnconnectedOutLayers();
-        vector<String> layersNames = model.getLayerNames();
+        // vector<String> names;
+        // vector<int> outLayers = model.getUnconnectedOutLayers();
+        // vector<String> layersNames = model.getLayerNames();
 
-        names.resize(outLayers.size());
+        // names.resize(outLayers.size());
 
-        for (size_t i =0; i < outLayers.size(); ++i)
-        {
-            names[i] = layersNames[outLayers[i] - 1];
-        }
+        // for (size_t i =0; i < outLayers.size(); ++i)
+        // {
+        //     names[i] = layersNames[outLayers[i] - 1];
+        // }
 
         vector<Mat> outMat;
-        model.forward(outMat, names);
+        model.forward(outMat, getOutputsNames(model));
 
-        cout << outMat[0] << endl;
+        auto end = getTickCount();
 
-        int a;
-        cin >> a;
+        remove_box(image, outMat);
 
-        float confThreshold = 0.20;
-        vector<int> classIds;
-        vector<float> confidences;
-        vector<cv::Rect> boxes;
-        for(size_t i = 0; i < outMat.size(); ++i)
-        {
-            float* data = (float*)outMat[i].data;
-            for(int j=0; j < outMat[i].rows; ++j, data += outMat[i].cols)
-            {
-                cv::Mat scores = outMat[i].row(j).colRange(5, outMat[i].cols);
-                cv::Point classId;
-                double confidence;
+        vector<double> layersTimes;
+        double freq = getTickFrequency() / 1000;
+        double t = model.getPerfProfile(layersTimes) / freq;
+        string label = format("Inference time for a frame : %.2f ms", t);
+        putText(image, label, Point(0, 15), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 255), 2, false);
 
-                cv::minMaxLoc(scores, 0, &confidence, 0, &classId);
-                if (confidence > confThreshold)
-                {
-                    cv::Rect box; int cx, cy;
-                    cx = (int)(data[0] * image.cols);
-                    cy = (int)(data[1] * image.rows);
-                    box.width = (int)(data[2] * image.cols);
-                    box.height = (int)(data[3] * image.rows);
-                    box.x = cx - box.width/2;
-                    box.y = cy - box.height/2;
-
-                    boxes.push_back(box);
-                    classIds.push_back(classId.x);
-                    confidences.push_back((float)confidence);
-                }
-            }
-        }
     
         // UImg = img.getUMat(ACCESS_READ);
+
+        auto totalTime = (end - start) / getTickFrequency();
+
+        putText(image, "FPS: " + to_string(int(1/totalTime)), Point(50, 50), FONT_HERSHEY_DUPLEX, 1, Scalar(0,255,0), 2, false);
 
         imshow("image", image);
         
@@ -173,3 +221,5 @@ int main()
     
     return 0;
 }
+
+
